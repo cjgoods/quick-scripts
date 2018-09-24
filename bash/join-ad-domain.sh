@@ -144,11 +144,12 @@ echo
 echo "Updating SSSD configuration"
 sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
 sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
-sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
+if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+  sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
+fi
 sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
 
 if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  sed -i "s/default_domain_suffix = $domain/#default_domain_suffix = $domain/" /etc/sssd/sssd.conf
   echo "enumerate = True" >> /etc/sssd/sssd.conf
 fi
 # Edit Sudoers
