@@ -4,6 +4,7 @@
 # Purpose: Connect CentOS 7 or Ubuntu 16.04 to Active Directory for centralized authentication using sssd and realmd.
 # OS Requirements: CentOS 7 or Ubuntu 16.04 (Tested on 64bit only)
 # Actions: Joins MS Active Directory domain and adds Domain Admins to sudoers
+# Notes: This script assumes that the system hostname and all networking parameters are configured correctly.
 
 # Determine distro
 if [ -f "/etc/os-release" ]; then
@@ -30,6 +31,8 @@ function match_distro() {
 
 if [ "$(match_distro "${supported_distros[@]}" "$distroname")" != "y" ]; then
     echo "Unsupported distro: $distroname"
+    echo "Supported distros:"
+    printf '%s\n' "${supported_distros[@]}"
     exit 1
 fi
 
