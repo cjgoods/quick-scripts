@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Owner: Chris Goodson (chris@goodson.systems)
-# Purpose: Connect CentOS 7 to Active Directory for centralized authentication using sssd and realmd.
-# OS Requirements: CentOS 7
+# Purpose: Connect CentOS 7 or Ubuntu 16.04 to Active Directory for centralized authentication using sssd and realmd.
+# OS Requirements: CentOS 7 or Ubuntu 16.04 (Tested on 64bit only)
 # Actions: Joins MS Active Directory domain and adds Domain Admins to sudoers
 
 # Determine distro
@@ -147,10 +147,17 @@ sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/
 sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
 sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
 
+if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  sed -i 's/default_domain_suffix = ITH.LOCAL/#default_domain_suffix = ITH.LOCAL/' /etc/sssd/sssd.conf
+  echo "enumerate = True" >> /etc/sssd/sssd.conf
+fi
 # Edit Sudoers
 echo
 echo "Updating sudoers"
-echo "%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/DomainAdmins
+cat >/etc/sudoers.d/DomainAdmins << EOL
+%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL
+%domain\ admins  ALL=(ALL) NOPASSWD: ALL
+EOL
 
 # All done
 echo
