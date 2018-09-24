@@ -160,6 +160,14 @@ cat >/etc/sudoers.d/DomainAdmins << EOL
 %domain\ admins  ALL=(ALL) NOPASSWD: ALL
 EOL
 
+# Allow home directory - Ubuntu
+if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  sed -i "/session optional pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/sssd/sssd.conf
+fi
+
+# Restarting SSSD
+service sssd restart
+
 # All done
 echo
   echo "Domain join complete. Attempt to log in with domain credentials to verify configuration."
