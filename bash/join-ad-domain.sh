@@ -161,6 +161,6 @@ EOL
 
 # All done
 echo
-echo "Domain join complete. Attempt to log in with domain credentials to verify configuration."
+  echo "Domain join complete. Attempt to log in with domain credentials to verify configuration."
 
 exit 0
