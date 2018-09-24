@@ -165,7 +165,7 @@ EOL
 
 # Allow home directory - Ubuntu
 if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  sed -i "/session optional pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/sssd/sssd.conf
+  sed -i "/session optional pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/pam.d/common-session
 fi
 
 # Restarting SSSD
