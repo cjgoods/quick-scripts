@@ -148,7 +148,7 @@ sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.c
 sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
 
 if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  sed -i 's/default_domain_suffix = ITH.LOCAL/#default_domain_suffix = ITH.LOCAL/' /etc/sssd/sssd.conf
+  sed -i "s/default_domain_suffix = $domain/#default_domain_suffix = $domain/" /etc/sssd/sssd.conf
   echo "enumerate = True" >> /etc/sssd/sssd.conf
 fi
 # Edit Sudoers
