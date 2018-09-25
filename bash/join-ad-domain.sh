@@ -67,8 +67,22 @@ done
 
 # Ask for DC address
 echo
-echo "Enter domain controller FQDN required for NTP service:"
-read ntp_fqdn
+while true; do
+  read -p "Enter primary domain controller hostname: " -e dc_host_1
+	read -p "Confirm primary domain controller: $dc_host_1@$domain (Y/n):" -n 1 -r -e dc1_answer
+	if [[ $dc1_answer =~ ^[Yy]$ ]]
+	then
+		break
+	fi
+done
+while true; do
+  read -p "Enter secondary domain controller hostname: " -e dc_host_2
+	read -p "Confirm secondary domain controller: $dc_host_2@$domain (Y/n):" -n 1 -r -e dc2_answer
+	if [[ $dc2_answer =~ ^[Yy]$ ]]
+	then
+		break
+	fi
+done
 
 # Install deps
 echo
@@ -86,7 +100,7 @@ if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
   echo
   echo "Configuring NTP"
   systemctl enable ntpd
-  ntpdate $ntp_fqdn
+  ntpdate $dc_host_1@$domain
   systemctl start ntpd
 elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
   if timedatectl | grep "Network time on: yes" && timedatectl | grep "NTP synchronized: yes"; then
@@ -112,23 +126,23 @@ elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
   fi
 fi
 
-# Edit RealmD configuration
+# Edit RealmD configuration - Ubuntu
 if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  cat >/etc/realmd.conf <<EOL
-  [users]
-  default-home = /home/%U
-  default-shell = /bin/bash
-  [active-directory]
-  default-client = sssd
-  os-name = Ubuntu Server
-  os-version = 16.04
-  [service]
-  automatic-install = no
-  [$domain]
-  fully-qualified-names = no
-  automatic-id-mapping = yes
-  user-principal = yes
-  manage-system = no
+cat >/etc/realmd.conf <<EOL
+[users]
+default-home = /home/%U
+default-shell = /bin/bash
+[active-directory]
+default-client = sssd
+os-name = Ubuntu Server
+os-version = 16.04
+[service]
+automatic-install = no
+[$domain]
+fully-qualified-names = no
+automatic-id-mapping = yes
+user-principal = yes
+manage-system = no
 EOL
 fi
 
@@ -142,31 +156,100 @@ else
   echo $errormessage
 fi
 
+# Update Kerberos configuration
+if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  mv /etc/krb5.conf /etc/krb5.conf.bak
+  cat >/etc/krb5.conf <<EOL
+[libdefaults]
+      default_realm = $domain
+      ticket_lifetime = 24h
+      renew_lifetime = 7d
+
+
+[realms]
+        $domain = {
+                kdc = $dc_host_1.$domain_answer
+                kdc = $dc_host_2.$domain_answer
+                admin_server = $dc_host_1.$domain_answer
+                default_domain = $domain_answer
+        }
+
+[domain_realm]
+        $domain_answer = $domain
+        .$domain_answer = $domain
+EOL
+fi
+
+
 # Edit SSSD configuration
 echo
 echo "Updating SSSD configuration"
-sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
-sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
-if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
-  sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
-fi
-sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
 
-if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  echo "enumerate = True" >> /etc/sssd/sssd.conf
+if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+  sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
+  sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
+  sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
+  sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
+elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  mv /etc/sssd/sssd.conf /etc/sssd/sssd.conf.bak
+  cat >/etc/sssd/sssd.conf <<EOL
+[sssd]
+services = nss,pam
+config_file_version = 2
+domains = $domain
+
+[domain/$domain]
+id_provider = ad
+access_provider = ad
+override_homedir = /home/%u
+enumerate = true
+use_fully_qualified_names = false
+subdomains_provider = none
+override_shell = /bin/bash
+EOL
 fi
+
+# Configure Samba
+if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
+  cat >/etc/samba/smb.conf <<EOL
+[global]
+
+   client signing = yes
+   client use spnego = yes
+   kerberos method = secrets and keytab
+   realm = $domain
+   security = ads
+   server string = %h
+   dns proxy = no
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   syslog = 0
+   panic action = /usr/share/samba/panic-action %d
+   server role = standalone server
+   obey pam restrictions = yes
+   unix password sync = yes
+   passwd program = /usr/bin/passwd %u
+   passwd chat = *Enter\snew\s*\spassword:* %n\n *Retype\snew\s*\spassword:* %n\n *password\supdated\ssuccessfully* .
+   pam password change = yes
+   map to guest = bad user
+   usershare allow guests = yes
+EOL
+chmod 600 /etc/sssd/sssd.conf
+fi
+
 # Edit Sudoers
 echo
 echo "Updating sudoers"
-cat >/etc/sudoers.d/DomainAdmins << EOL
-%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL
-%domain\ admins  ALL=(ALL) NOPASSWD: ALL
-EOL
+if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+  echo "%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
+elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+  echo "%domain\ admins  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
+fi
 
 # Allow home directory - Ubuntu
 if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  sed -i "/session[[:blank:]]*optional[[:blank:]]*pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/pam.d/common-session
-
+  sed -i.bak "/session[[:blank:]]*optional[[:blank:]]*pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/pam.d/common-session
 fi
 
 # Restarting SSSD
