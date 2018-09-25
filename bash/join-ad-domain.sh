@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 # Owner: Chris Goodson (chris@goodson.systems)
 # Purpose: Connect CentOS 7 or Ubuntu 16.04 to Active Directory for centralized authentication using sssd and realmd.
@@ -8,13 +8,16 @@
 
 # Determine distro
 if [ -f "/etc/os-release" ]; then
-	distroname=$(grep PRETTY_NAME /etc/os-release | sed 's/PRETTY_NAME=//g' | tr -d '="')
+	osfamily=$(grep ID= /etc/os-release | grep -v VERSION | sed 's/ID=//g' | tr -d '="')
+	osversion=$(grep VERSION_ID /etc/os-release | sed 's/VERSION_ID=//g' | tr -d '="')
+	distroname=$osfamily$osversion
+	echo "Discovered distro: $distroname"
 else
 	distroname="$(uname -s) $(uname -r)"
 fi
 
 # Validate distro
-supported_distros=("CentOS Linux 7 (Core)" "Ubuntu 16.04.5 LTS")
+supported_distros=("centos7" "ubuntu14.04" "ubuntu16.04" "ubuntu18.04")
 
 function match_distro() {
     local n=$#
@@ -60,8 +63,18 @@ while true; do
 	auth_user=$domain_user@$domain
 	read -p "Confirm user: $auth_user (Y/n):" -n 1 -r -e answer
 	if [[ $answer =~ ^[Yy]$ ]]; then
-		read -s -p "Enter password: " -e password
 		break
+	fi
+done
+
+# Ask for password
+while true; do
+	read -s -p "Enter password: " -e password && echo
+	read -s -p "Confirm password: " -e confirmpassword
+	if [[ "$password" == "$confirmpassword" ]] > /dev/null 2>&1 ; then
+		break
+	else
+		echo "Passwords do not match, try again"
 	fi
 done
 
@@ -88,46 +101,71 @@ done
 echo
 echo "Installing dependencies"
 
-if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+if [ "$osfamily" == "centos" ]; then
   yum install realmd sssd oddjob oddjob-mkhomedir adcli samba-common samba-common-tools ntpdate ntp -y
-elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  apt-get install realmd sssd sssd-tools samba-common krb5-user packagekit samba-common-bin samba-libs adcli -y
+elif [ "$osfamily" == "ubuntu" ]; then
+	export DEBIAN_FRONTEND=noninteractive
+  if ! apt-get install realmd sssd sssd-tools samba-common krb5-user packagekit samba-common-bin samba-libs adcli -y; then
+		if ! add-apt-repository universe -y; then
+			echo "Error adding universe repository"
+			exit 1
+		fi
+		if ! apt-get install realmd sssd sssd-tools samba-common krb5-user packagekit samba-common-bin samba-libs adcli -y; then
+			echo "Error installing required packages"
+			exit 1
+		fi
+	fi
 fi
 
-
 # Configure NTP
-if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+if [ "$osfamily" == "centos" ]; then
   echo
   echo "Configuring NTP"
   systemctl enable ntpd
   ntpdate $dc_host_1@$domain
   systemctl start ntpd
-elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
-  if timedatectl | grep "Network time on: yes" && timedatectl | grep "NTP synchronized: yes"; then
-    echo "NTP enabled"
-  else
-    timedatectl set-ntp on
-    ntpattempts=0
-    sleep 10
-    while true; do
-      if timedatectl | grep "Network time on: yes" && timedatectl | grep "NTP synchronized: yes"; then
-        break
-      else
-        if [[ $ntpattempts -le 10 ]]; then
-        ((ntpattempts+=1))
-        sleep 30
-        continue
-        else
-          echo "NTP Configuration Error - Aborting"
-          exit 1
-        fi
-      fi
-    done
-  fi
+elif [ "$osfamily" == "ubuntu" ]; then
+	if [ "$osversion" == "14.04" ]; then
+		if timedatectl | grep "NTP enabled: yes"; then
+		 	timesync=enabled
+		fi
+  elif [ "$osversion" == "16.04" ]; then
+		if timedatectl | grep "Network time on: yes"; then
+			timesync=enabled
+		fi
+  elif [ "$osversion" == "18.04" ]; then
+		if timedatectl | grep "systemd-timesyncd.service active: yes"; then
+			timesync=enabled
+		fi
+	fi
+  if [ "$osfamily" == "ubuntu" ]; then
+		if [ "$timesync" == "enabled" ]; then
+	    echo "Time sync enabled"
+	  else
+	    timedatectl set-ntp true
+	    ntpattempts=0
+	    sleep 10
+	    while true; do
+	      if timedatectl | grep "Network time on: yes" && timedatectl | grep "NTP synchronized: yes"; then
+	        break
+	      else
+	        if [[ $ntpattempts -le 10 ]]; then
+	        ((ntpattempts+=1))
+	        sleep 30
+					echo "Waiting for network time to syncronize... Attempt $ntpattempts/10"
+	        continue
+	        else
+	          echo "NTP Configuration Error - Aborting"
+	          exit 1
+	        fi
+	      fi
+	    done
+	  fi
+	fi
 fi
 
 # Edit RealmD configuration - Ubuntu
-if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+if [ "$osfamily" == "ubuntu" ]; then
 cat >/etc/realmd.conf <<EOL
 [users]
 default-home = /home/%U
@@ -149,7 +187,7 @@ fi
 # Join to domain
 echo
 echo "Attempting to join domain..."
-if errormessage=$(echo $password | realm join --user=$auth_user $domain > /dev/null 2>&1); then
+if errormessage=$(echo $password > /dev/null 2>&1 | realm join --user=$auth_user $domain > /dev/null 2>&1); then
   echo "Joined to domain: $domain"
 else
   echo "Unable to join domain"
@@ -157,7 +195,7 @@ else
 fi
 
 # Update Kerberos configuration
-if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+if [ "$osfamily" == "ubuntu" ]; then
   mv /etc/krb5.conf /etc/krb5.conf.bak
   cat >/etc/krb5.conf <<EOL
 [libdefaults]
@@ -185,12 +223,12 @@ fi
 echo
 echo "Updating SSSD configuration"
 
-if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+if [ "$osfamily" == "centos" ]; then
   sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
   sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
   sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
   sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
-elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+elif [ "$osfamily" == "ubuntu" ]; then
   mv /etc/sssd/sssd.conf /etc/sssd/sssd.conf.bak
   cat >/etc/sssd/sssd.conf <<EOL
 [sssd]
@@ -210,7 +248,7 @@ EOL
 fi
 
 # Configure Samba
-if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+if [ "$osfamily" == "ubuntu" ]; then
   mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
   cat >/etc/samba/smb.conf <<EOL
 [global]
@@ -241,14 +279,14 @@ fi
 # Edit Sudoers
 echo
 echo "Updating sudoers"
-if [ "$distroname" == "CentOS Linux 7 (Core)" ]; then
+if [ "$osfamily" == "centos" ]; then
   echo "%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
-elif [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+elif [ "$osfamily" == "ubuntu" ]; then
   echo "%domain\ admins  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
 fi
 
 # Allow home directory - Ubuntu
-if [ "$distroname" == "Ubuntu 16.04.5 LTS" ]; then
+if [ "$osfamily" == "ubuntu" ]; then
   sed -i.bak "/session[[:blank:]]*optional[[:blank:]]*pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/pam.d/common-session
 fi
 
