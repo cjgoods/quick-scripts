@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 # Owner: Chris Goodson (chris@goodson.systems)
 # Purpose: Connect CentOS 7 or Ubuntu 16.04 to Active Directory for centralized authentication using sssd and realmd.
