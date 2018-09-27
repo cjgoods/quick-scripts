@@ -291,7 +291,7 @@ if [ "$osfamily" == "ubuntu" ]; then
 fi
 
 # Restarting services
-service smb restart
+#service smb restart
 service sssd restart
 
 # All done
