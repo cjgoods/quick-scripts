@@ -17,7 +17,7 @@ else
 fi
 
 # Validate distro
-supported_distros=("centos7" "ubuntu14.04" "ubuntu16.04" "ubuntu18.04")
+supported_distros=("centos7" "ubuntu14.04" "ubuntu16.04")
 
 function match_distro() {
     local n=$#
@@ -290,7 +290,8 @@ if [ "$osfamily" == "ubuntu" ]; then
   sed -i.bak "/session[[:blank:]]*optional[[:blank:]]*pam_sss.so/a\session required pam_mkhomedir.so skel=\/etc\/skel\/ umask=0077" /etc/pam.d/common-session
 fi
 
-# Restarting SSSD
+# Restarting services
+service smb restart
 service sssd restart
 
 # All done
