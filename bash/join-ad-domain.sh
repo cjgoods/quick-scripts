@@ -117,6 +117,9 @@ elif [ "$osfamily" == "ubuntu" ]; then
 	fi
 fi
 
+echo "Software installation complete.  Starting configuration..."
+sleep 2
+
 # Configure NTP
 if [ "$osfamily" == "centos" ]; then
   echo
@@ -164,8 +167,12 @@ elif [ "$osfamily" == "ubuntu" ]; then
 	fi
 fi
 
+echo "Starting configuration"
+sleep 2
+
 # Edit RealmD configuration - Ubuntu
 if [ "$osfamily" == "ubuntu" ]; then
+  echo "Configuring RealmD"
 cat >/etc/realmd.conf <<EOL
 [users]
 default-home = /home/%U
@@ -184,18 +191,9 @@ manage-system = no
 EOL
 fi
 
-# Join to domain
-echo
-echo "Attempting to join domain..."
-if errormessage=$(echo $password > /dev/null 2>&1 | realm join --user=$auth_user $domain > /dev/null 2>&1); then
-  echo "Joined to domain: $domain"
-else
-  echo "Unable to join domain"
-  echo $errormessage
-fi
-
 # Update Kerberos configuration
 if [ "$osfamily" == "ubuntu" ]; then
+  echo "Configuring Kerberos"
   mv /etc/krb5.conf /etc/krb5.conf.bak
   cat >/etc/krb5.conf <<EOL
 [libdefaults]
@@ -218,11 +216,67 @@ if [ "$osfamily" == "ubuntu" ]; then
 EOL
 fi
 
+# Configure Samba
+if [ "$osfamily" == "ubuntu" ]; then
+  echo "Configuring Samba"
+  mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
+  workgroupid=$(echo $domain | awk -F. '{print $1}')
+  cat >/etc/samba/smb.conf <<EOL
+[global]
+   workgroup = $workgroupid
+   client signing = yes
+   client use spnego = yes
+   kerberos method = secrets and keytab
+   realm = $domain
+   security = ads
+   server string = %h
+   dns proxy = no
+   log file = /var/log/samba/log.%m
+   max log size = 1000
+   syslog = 0
+   panic action = /usr/share/samba/panic-action %d
+   server role = standalone server
+   obey pam restrictions = yes
+   unix password sync = yes
+   passwd program = /usr/bin/passwd %u
+   passwd chat = *Enter\snew\s*\spassword:* %n\n *Retype\snew\s*\spassword:* %n\n *password\supdated\ssuccessfully* .
+   pam password change = yes
+   map to guest = bad user
+   usershare allow guests = yes
+EOL
+chmod 600 /etc/sssd/sssd.conf
+fi
+
+# Attempt Kerberos authentication
+echo && echo "Attempting to authenticate with Kerberos"
+sleep 2
+if krbauth=$(echo $password > /dev/null 2>&1 | kinit $auth_user > /dev/null 2>&1); then
+  if klist; then
+    echo "Kerberos authentication successful"
+  else
+    echo "Kerberos authentication failed"
+    echo $krbauth
+    exit 1
+  fi
+fi
+
+# Join to domain
+echo && echo "Attempting to join domain with RealmD..."
+sleep 2
+if realmdmessage=$(echo $password > /dev/null 2>&1 | realm join --user=$auth_user $domain > /dev/null 2>&1); then
+  echo "Joined to domain: $domain"
+else
+  echo $realmdmessage
+  echo "Domain join with RealmD failed.  Attempting with Samba..."
+  if ! net ads join -k; then
+    echo "Unable to join domain $domain"
+    exit 1
+  fi
+fi
 
 # Edit SSSD configuration
-echo
-echo "Updating SSSD configuration"
-
+echo && echo "Updating SSSD configuration"
+sleep 2
 if [ "$osfamily" == "centos" ]; then
   sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
   sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
@@ -247,42 +301,13 @@ override_shell = /bin/bash
 EOL
 fi
 
-# Configure Samba
-if [ "$osfamily" == "ubuntu" ]; then
-  mv /etc/samba/smb.conf /etc/samba/smb.conf.bak
-  cat >/etc/samba/smb.conf <<EOL
-[global]
-
-   client signing = yes
-   client use spnego = yes
-   kerberos method = secrets and keytab
-   realm = $domain
-   security = ads
-   server string = %h
-   dns proxy = no
-   log file = /var/log/samba/log.%m
-   max log size = 1000
-   syslog = 0
-   panic action = /usr/share/samba/panic-action %d
-   server role = standalone server
-   obey pam restrictions = yes
-   unix password sync = yes
-   passwd program = /usr/bin/passwd %u
-   passwd chat = *Enter\snew\s*\spassword:* %n\n *Retype\snew\s*\spassword:* %n\n *password\supdated\ssuccessfully* .
-   pam password change = yes
-   map to guest = bad user
-   usershare allow guests = yes
-EOL
-chmod 600 /etc/sssd/sssd.conf
-fi
-
 # Edit Sudoers
-echo
-echo "Updating sudoers"
+echo && echo "Updating sudoers"
 if [ "$osfamily" == "centos" ]; then
   echo "%Domain\ Admins@$domain  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
 elif [ "$osfamily" == "ubuntu" ]; then
   echo "%domain\ admins  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/DomainAdmins
+  echo "%gatewayimages  ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/GatewayImages
 fi
 
 # Allow home directory - Ubuntu
