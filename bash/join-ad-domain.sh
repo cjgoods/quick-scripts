@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 # Owner: Chris Goodson (chris@goodson.systems)
 # Purpose: Connect CentOS 7 or Ubuntu 16.04 to Active Directory for centralized authentication using sssd and realmd.
@@ -105,6 +105,8 @@ if [ "$osfamily" == "centos" ]; then
   yum install realmd sssd oddjob oddjob-mkhomedir adcli samba-common samba-common-tools ntpdate ntp -y
 elif [ "$osfamily" == "ubuntu" ]; then
 	export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install software-properties-common
   if ! apt-get install realmd sssd sssd-tools samba-common krb5-user packagekit samba-common-bin samba-libs adcli -y; then
 		if ! add-apt-repository universe -y; then
 			echo "Error adding universe repository"
@@ -244,13 +246,12 @@ if [ "$osfamily" == "ubuntu" ]; then
    map to guest = bad user
    usershare allow guests = yes
 EOL
-chmod 600 /etc/sssd/sssd.conf
 fi
 
 # Attempt Kerberos authentication
 echo && echo "Attempting to authenticate with Kerberos"
 sleep 2
-if krbauth=$(echo $password > /dev/null 2>&1 | kinit $auth_user > /dev/null 2>&1); then
+if krbauth=$(kinit $auth_user -k -t $domain_user.keytab); then
   if klist; then
     echo "Kerberos authentication successful"
   else
@@ -299,6 +300,7 @@ use_fully_qualified_names = false
 subdomains_provider = none
 override_shell = /bin/bash
 EOL
+chmod 600 /etc/sssd/sssd.conf
 fi
 
 # Edit Sudoers
