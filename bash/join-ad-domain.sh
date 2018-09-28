@@ -106,7 +106,7 @@ if [ "$osfamily" == "centos" ]; then
 elif [ "$osfamily" == "ubuntu" ]; then
 	export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install software-properties-common
+  apt-get install software-properties-common -y
   if ! apt-get install realmd sssd sssd-tools samba-common krb5-user packagekit samba-common-bin samba-libs adcli -y; then
 		if ! add-apt-repository universe -y; then
 			echo "Error adding universe repository"
