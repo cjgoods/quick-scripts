@@ -6,6 +6,9 @@
 # Actions: Joins MS Active Directory domain and adds Domain Admins to sudoers
 # Notes: This script assumes that the system hostname and all networking parameters are configured correctly.
 
+exec > >(tee -i join-ad.log)
+exec 2>&1
+
 # Determine distro
 if [ -f "/etc/os-release" ]; then
 	osfamily=$(grep ID= /etc/os-release | grep -v VERSION | sed 's/ID=//g' | tr -d '="')
@@ -263,28 +266,32 @@ fi
 
 # Join to domain
 echo && echo "Attempting to join domain with RealmD..."
-sleep 2
+sleep 1
 if realmdmessage=$(echo $password > /dev/null 2>&1 | realm join --user=$auth_user $domain > /dev/null 2>&1); then
   echo "Joined to domain: $domain"
+  joinedusing=realmd
 else
   echo $realmdmessage
   echo "Domain join with RealmD failed.  Attempting with Samba..."
-  if ! net ads join -k; then
+  if net ads join -k > /dev/null 2>&1; then
+    echo "Successfully joined to domain $domain"
+    joinedusing=samba
+  else
     echo "Unable to join domain $domain"
     exit 1
   fi
 fi
 
-# Edit SSSD configuration
-echo && echo "Updating SSSD configuration"
-sleep 2
+# Update SSSD
+if [ "$joinedusing" == "realmd" ]; then
+  mv /etc/sssd/sssd.conf /etc/sssd/sssd.conf.bak
+fi
 if [ "$osfamily" == "centos" ]; then
   sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
   sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
   sed -i "/services = nss, pam/a\default_domain_suffix = $domain" /etc/sssd/sssd.conf
   sed -i 's/access_provider = ad/access_provider = simple/' /etc/sssd/sssd.conf
 elif [ "$osfamily" == "ubuntu" ]; then
-  mv /etc/sssd/sssd.conf /etc/sssd/sssd.conf.bak
   cat >/etc/sssd/sssd.conf <<EOL
 [sssd]
 services = nss,pam
