@@ -48,6 +48,15 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Check hostname length
+myhostname=$(hostname)
+if [ ${#myhostname} -gt 15 ]; then
+  echo "Hostname must be 15 characters or less to bind a domain. Current hostname is ${#myhostname} characters.  Reconfigure hostname and try again."
+  exit 1
+else
+  echo "Hostname: $myhostname"
+fi
+
 # Ask for domain
 while true; do
 	read -p "Domain (i.e. mydomain.local): " -e domain_answer
@@ -278,6 +287,7 @@ else
     joinedusing=samba
   else
     echo "Unable to join domain $domain"
+    net ads join -k
     exit 1
   fi
 fi
