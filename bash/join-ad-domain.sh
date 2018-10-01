@@ -68,7 +68,6 @@ while true; do
 	fi
 done
 
-
 # Ask for username
 while true; do
 	read -p "Enter $domain username required for authentication: " -e domain_user
@@ -79,16 +78,13 @@ while true; do
 	fi
 done
 
-# Ask for password
-while true; do
-	read -s -p "Enter password: " -e password && echo
-	read -s -p "Confirm password: " -e confirmpassword
-	if [[ "$password" == "$confirmpassword" ]] > /dev/null 2>&1 ; then
-		break
-	else
-		echo "Passwords do not match, try again"
-	fi
-done
+if [ -e $domain_user.keytab ]; then
+  echo "Matching Kerberos keytab found"
+else
+  echo "Error: $domain_user.keytab not found.  Ensure keytab matches the format username.keytab, and is located in the same directory as this script"
+  exit 1
+fi
+
 
 # Ask for DC address
 echo
@@ -274,28 +270,17 @@ if krbauth=$(kinit $auth_user -k -t $domain_user.keytab); then
 fi
 
 # Join to domain
-echo && echo "Attempting to join domain with RealmD..."
+echo && echo "Attempting to join domain ..."
 sleep 1
-if realmdmessage=$(echo $password > /dev/null 2>&1 | realm join --user=$auth_user $domain > /dev/null 2>&1); then
-  echo "Joined to domain: $domain"
-  joinedusing=realmd
-else
-  echo $realmdmessage
-  echo "Domain join with RealmD failed.  Attempting with Samba..."
-  if net ads join -k > /dev/null 2>&1; then
+if net ads join -k > /dev/null 2>&1; then
     echo "Successfully joined to domain $domain"
-    joinedusing=samba
   else
     echo "Unable to join domain $domain"
     net ads join -k
     exit 1
   fi
-fi
 
 # Update SSSD
-if [ "$joinedusing" == "realmd" ]; then
-  mv /etc/sssd/sssd.conf /etc/sssd/sssd.conf.bak
-fi
 if [ "$osfamily" == "centos" ]; then
   sed -i.bak 's/use_fully_qualified_names = True/use_fully_qualified_names = False/' /etc/sssd/sssd.conf
   sed -i 's/fallback_homedir = \/home\/%u@%d/fallback_homedir = \/home\/%u/' /etc/sssd/sssd.conf
