@@ -321,11 +321,12 @@ fi
 
 # Restarting services
 #service smb restart
+sleep 5
 service sssd restart
 
-# Cleaning up
-echo "Removing keytab"
-rm -rf $domain_user.keytab
+# # Cleaning up
+# echo "Removing keytab"
+# rm -rf $domain_user.keytab
 
 # All done
 echo
