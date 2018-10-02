@@ -323,6 +323,10 @@ fi
 #service smb restart
 service sssd restart
 
+# Cleaning up
+echo "Removing keytab"
+rm -rf $domain_user.keytab
+
 # All done
 echo
   echo "Domain join complete. Attempt to log in with domain credentials to verify configuration."
